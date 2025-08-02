@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../user/home_screen.dart'; // Make sure this exists
+import '../admin/admin_home_screen.dart';
+import '../super_admin/super_admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,16 +21,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void sendOTP() async {
     await _auth.verifyPhoneNumber(
-      phoneNumber: '+91${phoneController.text}',
+      phoneNumber: '+91${phoneController.text.trim()}',
       verificationCompleted: (PhoneAuthCredential credential) async {
-        // Auto sign-in (for Android)
         await _auth.signInWithCredential(credential);
-        navigateToHome(); // directly go to home
+        await _handlePostLogin();
       },
       verificationFailed: (FirebaseAuthException e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Verification Failed: ${e.message}")),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Verification Failed: ${e.message}")),
+          );
+        }
       },
       codeSent: (String verId, int? resendToken) {
         setState(() {
@@ -46,38 +49,103 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final credential = PhoneAuthProvider.credential(
         verificationId: verificationId!,
-        smsCode: otpController.text,
+        smsCode: otpController.text.trim(),
       );
 
       final userCredential = await _auth.signInWithCredential(credential);
-      final uid = userCredential.user!.uid;
+      await _handlePostLogin(userCredential: userCredential);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Invalid OTP: $e")),
+        );
+      }
+    }
+  }
 
-      await FirebaseFirestore.instance.collection('users').doc(uid).set({
-        'phone': '+91${phoneController.text}',
-        'role': 'retailer',
-        'createdAt': FieldValue.serverTimestamp(),
+  // Handles Firestore user doc creation/updating and role-based navigation after login
+  Future<void> _handlePostLogin({UserCredential? userCredential}) async {
+    final user = userCredential?.user ?? _auth.currentUser;
+    if (user == null) return;
+
+    final uid = user.uid;
+    final mobileNo = '+91${phoneController.text.trim()}';
+    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+    final userDoc = await userRef.get();
+
+    if (userDoc.exists) {
+      // Update lastLoggedIn and mobileNo on each login
+      await userRef.update({
+        'mobileNo': mobileNo,
+        'lastLoggedIn': FieldValue.serverTimestamp(),
       });
+    } else {
+      // New user document creation
+      await userRef.set({
+        'userId': uid,
+        'mobileNo': mobileNo,
+        'uname': '',
+        'area': '',
+        'city': '',
+        'pincode': '',
+        'isAdmin': false,
+        'isSuperAdmin': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastLoggedIn': FieldValue.serverTimestamp(),
+        'role': 'retailer',
+      });
+    }
 
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Login Successful!")),
       );
 
-      navigateToHome();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Invalid OTP: $e")),
-      );
+      // Check roles and navigate accordingly
+      final data = userDoc.exists ? userDoc.data()! : null;
+
+      // If new user document created, use default roles (false)
+      final isAdmin = data != null && data['isAdmin'] == true;
+      final isSuperAdmin = data != null && data['isSuperAdmin'] == true;
+
+      if (isSuperAdmin) {
+        navigateToSuperAdminHome();
+      } else if (isAdmin) {
+        navigateToAdminHome();
+      } else {
+        navigateToUserHome();
+      }
     }
   }
 
-  void navigateToHome() {
-    print("Navigating to Home..."); // Add this to confirm
+  void navigateToUserHome() {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const HomeScreen()),
     );
   }
 
+  void navigateToAdminHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const AdminHomeScreen()),
+    );
+  }
+
+  void navigateToSuperAdminHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const SuperAdminHomeScreen()),
+    );
+  }
+
+  @override
+  void dispose() {
+    phoneController.dispose();
+    otpController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
