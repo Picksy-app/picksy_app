@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../user/home_screen.dart'; // Make sure this exists
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,11 +21,14 @@ class _LoginScreenState extends State<LoginScreen> {
     await _auth.verifyPhoneNumber(
       phoneNumber: '+91${phoneController.text}',
       verificationCompleted: (PhoneAuthCredential credential) async {
+        // Auto sign-in (for Android)
         await _auth.signInWithCredential(credential);
+        navigateToHome(); // directly go to home
       },
       verificationFailed: (FirebaseAuthException e) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Verification Failed: ${e.message}")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Verification Failed: ${e.message}")),
+        );
       },
       codeSent: (String verId, int? resendToken) {
         setState(() {
@@ -40,30 +44,40 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void verifyOTP() async {
     try {
-      PhoneAuthCredential credential = PhoneAuthProvider.credential(
+      final credential = PhoneAuthProvider.credential(
         verificationId: verificationId!,
         smsCode: otpController.text,
       );
 
-      UserCredential userCredential = await _auth.signInWithCredential(credential);
+      final userCredential = await _auth.signInWithCredential(credential);
       final uid = userCredential.user!.uid;
 
-      // Save user to Firestore
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'phone': '+91${phoneController.text}',
-        'role': 'retailer', // default
+        'role': 'retailer',
         'createdAt': FieldValue.serverTimestamp(),
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Login Successful!")),
       );
-      // Navigate to home/dashboard (later)
+
+      navigateToHome();
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Invalid OTP: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Invalid OTP: $e")),
+      );
     }
   }
+
+  void navigateToHome() {
+    print("Navigating to Home..."); // Add this to confirm
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -74,14 +88,25 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           children: [
             TextField(
-
+              controller: phoneController,
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
                 labelText: 'Mobile Number',
                 prefixText: '+91 ',
               ),
             ),
-
+            const SizedBox(height: 16),
+            if (otpSent)
+              TextField(
+                controller: otpController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Enter OTP'),
+              ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: otpSent ? verifyOTP : sendOTP,
+              child: Text(otpSent ? 'Verify OTP' : 'Send OTP'),
+            ),
           ],
         ),
       ),
