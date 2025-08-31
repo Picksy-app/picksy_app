@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class AddItemScreen extends StatefulWidget {
   const AddItemScreen({super.key});
+
   @override
   State<AddItemScreen> createState() => _AddItemScreenState();
 }
@@ -12,42 +13,41 @@ class AddItemScreen extends StatefulWidget {
 class _AddItemScreenState extends State<AddItemScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  // Product text controllers
+  // Controllers - Basic Fields
   final nameEnController = TextEditingController();
   final nameTaController = TextEditingController();
   final descriptionController = TextEditingController();
   final otherDescriptionController = TextEditingController();
-  final wholesalePriceController = TextEditingController();
-  final retailPriceController = TextEditingController();
-  final offerController = TextEditingController();
-  final otherOfferController = TextEditingController();
   final fssaiController = TextEditingController();
   final hsnController = TextEditingController();
-  final minQtyStepController = TextEditingController();
-  final stockController = TextEditingController();
   final barcodeController = TextEditingController();
   final imagesController = TextEditingController();
+  final ingredientsController = TextEditingController();
   final notifyStockController = TextEditingController();
 
-  // Variant controllers
-  final variantQtyController = TextEditingController();
-  final variantMrpController = TextEditingController();
-  final variantPriceController = TextEditingController();
-  List<Map<String, dynamic>> variants = [];
+  // Controllers - Variant Fields
+  final qtyController = TextEditingController();
+  final mrpController = TextEditingController();
+  final offerRetailController = TextEditingController();
+  final offerWholesaleController = TextEditingController();
+  final stockController = TextEditingController();
+  final otherOfferController = TextEditingController();
 
-  String unit = 'g';
-  String minQtyStep = '10';
+  String unitQty = 'g';            // unit measurement dropdown (g, kg, pcs, l, etc)
+  String minQtyStep = '10';        // min qty step (unused in UI here but kept)
+
   bool isFeatured = false;
   bool isVisible = true;
   DateTime? expirationDate;
 
-  final List<String> units = ['g', 'kg', 'ml', 'l', 'pcs', 'packet'];
-  final List<String> minQtySteps = ['10', '50', '100', '250', '500', '1000'];
-
-  // Multi-select category/sub-category support
+  List<Map<String, dynamic>> variants = [];
   List<Map<String, String>> categorySubCatPairs = [];
+
   String? tempSelectedCategoryId;
   String? tempSelectedSubCategoryId;
+
+  final List<String> units = ['g', 'kg', 'pcs', 'ltr', 'ml', 'packet'];
+  final List<String> minQtySteps = ['10', '50', '100', '250', '500', '1000'];
 
   Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _fetchCategories() async {
     final snapshot = await FirebaseFirestore.instance.collection('categories').get();
@@ -64,393 +64,551 @@ class _AddItemScreenState extends State<AddItemScreen> {
   }
 
   void _addCategorySubCatPair() {
-    if (tempSelectedCategoryId != null && tempSelectedSubCategoryId != null) {
-      setState(() {
-        categorySubCatPairs.add({
-          'categoryId': tempSelectedCategoryId!,
-          'subCategoryId': tempSelectedSubCategoryId!,
+    if(tempSelectedCategoryId != null && tempSelectedSubCategoryId != null){
+      // Avoid duplicates
+      bool exists = categorySubCatPairs.any((e) =>
+      e['categoryId'] == tempSelectedCategoryId && e['subCategoryId'] == tempSelectedSubCategoryId);
+      if(!exists){
+        setState(() {
+          categorySubCatPairs.add({
+            'categoryId': tempSelectedCategoryId!,
+            'subCategoryId': tempSelectedSubCategoryId!,
+          });
+          tempSelectedCategoryId = null;
+          tempSelectedSubCategoryId = null;
         });
-        tempSelectedCategoryId = null;
-        tempSelectedSubCategoryId = null;
-      });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Category/Subcategory pair already added")));
+      }
     }
   }
 
-  void _removePair(int index) {
+  void _removePair(int index){
     setState(() {
       categorySubCatPairs.removeAt(index);
     });
   }
 
-  void _addVariant() {
-    if (variantQtyController.text.isEmpty ||
-        variantMrpController.text.isEmpty ||
-        variantPriceController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Enter all variant fields")));
+  void _addVariant(){
+    // Validate inputs
+    if(qtyController.text.trim().isEmpty || mrpController.text.trim().isEmpty
+        || offerRetailController.text.trim().isEmpty || offerWholesaleController.text.trim().isEmpty
+        || stockController.text.trim().isEmpty || notifyStockController.text.trim().isEmpty){
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please fill Qty, MRP, Retail, Wholesale & Stock fields")));
       return;
     }
+    final double? qtyValue = double.tryParse(qtyController.text);
+    final double? mrpValue = double.tryParse(mrpController.text);
+    final double? retailValue = double.tryParse(offerRetailController.text);
+    final double? wholesaleValue = double.tryParse(offerWholesaleController.text);
+    final double? stockValue = double.tryParse(stockController.text);
+    final int? notifyStock = int.tryParse(notifyStockController.text);
+    if(qtyValue==null || mrpValue==null || retailValue==null || wholesaleValue==null || stockValue==null || notifyStock == null){
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please enter valid numbers in the variant fields")));
+      return;
+    }
+
     setState(() {
       variants.add({
-        'qty': variantQtyController.text,
-        'mrp': double.tryParse(variantMrpController.text) ?? 0.0,
-        'price': double.tryParse(variantPriceController.text) ?? 0.0,
+        'qty': qtyValue,
+        'unit': unitQty,
+        'mrp': mrpValue,
+        'priceRetail': retailValue,
+        'priceWholesale': wholesaleValue,
+        'stock': stockValue,
+        "notifyStock": notifyStock,
+        'otherOffer': otherOfferController.text.trim(),
       });
-      variantQtyController.clear();
-      variantMrpController.clear();
-      variantPriceController.clear();
+      // Clear variant input fields
+      qtyController.clear();
+      mrpController.clear();
+      offerRetailController.clear();
+      offerWholesaleController.clear();
+      stockController.clear();
+      notifyStockController.clear();
+      otherOfferController.clear();
+      unitQty = units[0]; // Reset unit dropdown
     });
   }
 
   @override
-  void dispose() {
-    for (final c in [
-      nameEnController, nameTaController, descriptionController, otherDescriptionController,
-      wholesalePriceController, retailPriceController, offerController, otherOfferController,
-      fssaiController, hsnController, minQtyStepController, stockController, barcodeController,
-      imagesController, notifyStockController, variantQtyController, variantMrpController, variantPriceController,
-    ]) {
-      c.dispose();
-    }
+  void dispose(){
+    [
+      nameEnController,
+      nameTaController,
+      descriptionController,
+      otherDescriptionController,
+      fssaiController,
+      hsnController,
+      barcodeController,
+      imagesController,
+      ingredientsController,
+      notifyStockController,
+      qtyController,
+      mrpController,
+      offerRetailController,
+      offerWholesaleController,
+      stockController,
+      otherOfferController,
+    ].forEach((c) => c.dispose());
     super.dispose();
   }
 
-  Future<void> addProduct() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final adminUserId = FirebaseAuth.instance.currentUser?.uid;
-    if (adminUserId == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("User not logged in!")));
+  Future<void> addProduct() async{
+    if(!_formKey.currentState!.validate()){
       return;
     }
-
-    try {
-      final images = imagesController.text
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
+    if(variants.isEmpty){
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please add at least one product variant")));
+      return;
+    }
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if(uid == null){
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("User not logged in")));
+      return;
+    }
+    try{
+      final images = imagesController.text.trim().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
       await FirebaseFirestore.instance.collection('products').add({
         'nameEn': nameEnController.text.trim(),
         'nameTa': nameTaController.text.trim(),
-        'categoryIds': categorySubCatPairs.map((x) => x['categoryId']).toList(),
-        'subCategoryIds': categorySubCatPairs.map((x) => x['subCategoryId']).toList(),
-        'unit': unit,
-        'pricePerUnitRetail': double.tryParse(retailPriceController.text) ?? 0,
-        'pricePerUnitWholesale': double.tryParse(wholesalePriceController.text) ?? 0,
-        'minOrderQty': int.tryParse(minQtyStep),
-        'unitStep': int.tryParse(minQtyStep),
-        'availableStock': double.tryParse(stockController.text) ?? 0,
-        'offers': otherOfferController.text,
-        'discount': int.tryParse(offerController.text) ?? 0,
-        'notifyStock': int.tryParse(notifyStockController.text) ?? 0,
-        'description': descriptionController.text,
-        'otherDescription': otherDescriptionController.text,
-        'fssai': fssaiController.text,
-        'hsnCode': hsnController.text,
-        'barcode': barcodeController.text,
+        'description': descriptionController.text.trim(),
+        'otherDescription': otherDescriptionController.text.trim(),
+        'ingredients': ingredientsController.text.trim(),
+        'categoryIds': categorySubCatPairs.map((e)=>e['categoryId']).toList(),
+        'subCategoryIds': categorySubCatPairs.map((e)=>e['subCategoryId']).toList(),
+        'unit': unitQty,
+        'minQtyStep': int.tryParse(minQtyStep) ?? 1,
+        'variants': variants,
+        'stock': double.tryParse(stockController.text) ?? 0,
+        'fssai': fssaiController.text.trim(),
+        'hsnCode': hsnController.text.trim(),
+        'barcode': barcodeController.text.trim(),
+        'images': images,
         'expirationDate': expirationDate != null ? Timestamp.fromDate(expirationDate!) : null,
         'isFeatured': isFeatured,
         'isVisible': isVisible,
-        'images': images,
-        'variants': variants,
-        'adminUserId': adminUserId,
+        'createdBy': uid,
         'createdAt': FieldValue.serverTimestamp(),
+        'offerPercent': int.tryParse(offerRetailController.text) ?? 0,
+        'otherOffer': otherOfferController.text.trim(),
       });
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Product added successfully!')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Product added successfully")));
       _formKey.currentState!.reset();
-
-      // Clear all
-      for (final c in [
-        nameEnController, nameTaController, descriptionController, otherDescriptionController,
-        wholesalePriceController, retailPriceController, offerController, otherOfferController,
-        fssaiController, hsnController, minQtyStepController, stockController, barcodeController,
-        imagesController, notifyStockController, variantQtyController, variantMrpController, variantPriceController
-      ]) {
-        c.clear();
-      }
+      // Clear state and controllers
       setState(() {
         categorySubCatPairs.clear();
-        tempSelectedCategoryId = null;
-        tempSelectedSubCategoryId = null;
         variants.clear();
         expirationDate = null;
-        unit = 'g';
+        unitQty = units[0];
         minQtyStep = '10';
         isFeatured = false;
         isVisible = true;
+        tempSelectedCategoryId = null;
+        tempSelectedSubCategoryId = null;
       });
-    } catch (e) {
+      [
+        nameEnController, nameTaController, descriptionController, otherDescriptionController,
+        ingredientsController, fssaiController, hsnController, barcodeController,
+        imagesController, notifyStockController, qtyController, mrpController,
+        offerRetailController, offerWholesaleController, stockController,
+        otherOfferController,
+      ].forEach((c) => c.clear());
+    }catch(e){
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add product: $e')));
+          SnackBar(content: Text("Failed to add product: $e"))
+      );
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context){
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Product')),
+      appBar: AppBar(title: const Text("Add Product")),
       body: Padding(
         padding: const EdgeInsets.all(14.0),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
-              // Multi-selection chips for category/subcat pairs
+
+              // Display selected category-subcategory pairs as dismissible chips
               if (categorySubCatPairs.isNotEmpty)
                 Wrap(
                   spacing: 8,
-                  children: [
-                    for (int i = 0; i < categorySubCatPairs.length; i++)
-                      Chip(
-                        label: Text('${categorySubCatPairs[i]['categoryId']} / ${categorySubCatPairs[i]['subCategoryId']}'),
-                        onDeleted: () => _removePair(i),
-                      ),
-                  ],
+                  children: List.generate(categorySubCatPairs.length, (index) {
+                    final pair = categorySubCatPairs[index];
+                    return Chip(
+                      label: Text("${pair['categoryId']} / ${pair['subCategoryId']}"),
+                      onDeleted: () => _removePair(index),
+                    );
+                  }),
                 ),
+
               const SizedBox(height: 10),
 
-              // Category/Sub-category selection row (with "+")
+// Category and Subcategory dropdowns with Add button
               Row(
                 children: [
+                  // Category Dropdown
                   Expanded(
                     child: FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
                       future: _fetchCategories(),
-                      builder: (ctx, catSnap) {
-                        if (!catSnap.hasData) return const LinearProgressIndicator();
-                        final cats = catSnap.data!;
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) return const LinearProgressIndicator();
+                        final cats = snapshot.data!;
+
                         return DropdownButtonFormField<String>(
-                          hint: const Text('Category'),
+                          decoration: InputDecoration(
+                            labelText: 'Select Category',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                          ),
                           value: tempSelectedCategoryId,
-                          items: cats.map((cat) => DropdownMenuItem(
-                            value: cat.id,
-                            child: Text(cat['name']),
-                          )).toList(),
-                          onChanged: (id) {
+                          items: cats.map((cat) {
+                            final catName = cat.data()['name'] ?? '';
+                            return DropdownMenuItem<String>(
+                              value: cat.id,
+                              child: Text(catName),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
                             setState(() {
-                              tempSelectedCategoryId = id;
+                              tempSelectedCategoryId = val;
                               tempSelectedSubCategoryId = null;
                             });
                           },
-                          validator: (val) => val == null || val.isEmpty ? "Choose Category" : null,
+                          validator: (val) => val == null || val.isEmpty ? 'Please select a category' : null,
+                          isExpanded: true,
                         );
                       },
                     ),
                   ),
+
                   const SizedBox(width: 10),
+
+                  // Subcategory Dropdown
                   Expanded(
                     child: FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
                       future: _fetchSubCategories(tempSelectedCategoryId),
-                      builder: (ctx, subCatSnap) {
-                        if (tempSelectedCategoryId == null || !subCatSnap.hasData) {
-                          return const SizedBox();
-                        }
-                        final subCats = subCatSnap.data!;
+                      builder: (context, snapshot) {
+                        if (tempSelectedCategoryId == null || !snapshot.hasData) return const SizedBox.shrink();
+                        final subs = snapshot.data!;
+
                         return DropdownButtonFormField<String>(
-                          hint: const Text('Sub-Category'),
+                          decoration: InputDecoration(
+                            labelText: 'Select Subcategory',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                          ),
                           value: tempSelectedSubCategoryId,
-                          items: subCats.map((sub) => DropdownMenuItem(
-                            value: sub.id,
-                            child: Text(sub['name']),
-                          )).toList(),
-                          onChanged: (id) {
-                            setState(() => tempSelectedSubCategoryId = id);
+                          items: subs.map((sub) {
+                            final subName = sub.data()['name'] ?? '';
+                            return DropdownMenuItem<String>(
+                              value: sub.id,
+                              child: Text(subName),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              tempSelectedSubCategoryId = val;
+                            });
                           },
-                          validator: (val) => val == null || val.isEmpty ? "Choose Sub-Category" : null,
+                          validator: (val) => val == null || val.isEmpty ? 'Please select a subcategory' : null,
+                          isExpanded: true,
                         );
                       },
                     ),
                   ),
+
                   const SizedBox(width: 10),
+
+                  // Add Pair Button
                   ElevatedButton(
                     onPressed: _addCategorySubCatPair,
-                    child: const Text('+'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-
-              // Variant entry
-              Text('Product Variants (Weight & Price)', style: const TextStyle(fontWeight: FontWeight.bold)),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: variantQtyController,
-                      decoration: const InputDecoration(labelText: "Qty (e.g. 1 kg)"),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextFormField(
-                      controller: variantMrpController,
-                      decoration: const InputDecoration(labelText: "MRP"),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextFormField(
-                      controller: variantPriceController,
-                      decoration: const InputDecoration(labelText: "Offered Price"),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: _addVariant,
-                  ),
-                ],
-              ),
-              if (variants.isNotEmpty)
-                Column(
-                  children: List.generate(
-                    variants.length,
-                        (i) => ListTile(
-                      title: Text('${variants[i]['qty']} - \$${variants[i]['price']} (MRP \$${variants[i]['mrp']})'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () {
-                          setState(() {
-                            variants.removeAt(i);
-                          });
-                        },
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
+                      minimumSize: const Size(48, 48),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                     ),
+                    child: const Text('+', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+// Variants entry card with vertical layout for responsive UI
+              Card(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Qty and Unit in one row
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: qtyController,
+                              decoration: const InputDecoration(
+                                labelText: "Quantity",
+                                hintText: "e.g., 1.5",
+                              ),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 1,
+                            child: DropdownButtonFormField<String>(
+                              decoration: const InputDecoration(labelText: "Unit"),
+                              value: unitQty,
+                              items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() {
+                                    unitQty = val;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // MRP, Offered Retail, Offered Wholesale prices row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: mrpController,
+                              decoration: const InputDecoration(labelText: "MRP Price"),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: offerRetailController,
+                              decoration: const InputDecoration(labelText: "Offered Retail Price"),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: offerWholesaleController,
+                              decoration: const InputDecoration(labelText: "Offered Wholesale Price"),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Stock, Notify Stock, Other Offer in one row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: stockController,
+                              decoration: const InputDecoration(labelText: "Stock"),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: notifyStockController,
+                              decoration: const InputDecoration(labelText: "Notify When ≤"),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: otherOfferController,
+                              decoration: const InputDecoration(labelText: "Other Offer"),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Add variant button aligned right
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: IconButton(
+                          icon: const Icon(Icons.add_circle, color: Colors.green, size: 30),
+                          tooltip: "Add Variant",
+                          onPressed: _addVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+              ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+
+// List of added variants as Cards with details and delete option
+              if (variants.isNotEmpty)
+                Column(
+                  children: variants.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final variant = entry.value;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      child: ListTile(
+                        title: Text("${variant['qty']} ${variant['unit']}"),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("MRP: ₹${variant['mrp']}"),
+                            Text("Retail: ₹${variant['priceRetail']}"),
+                            Text("Wholesale: ₹${variant['priceWholesale']}"),
+                            Text("Stock: ${variant['stock']}"),
+                            if ((variant['otherOffer'] ?? '').isNotEmpty)
+                              Text("Offer: ${variant['otherOffer']}"),
+                          ],
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          onPressed: () {
+                            setState(() {
+                              variants.removeAt(index);
+                            });
+                          },
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+
+              const SizedBox(height: 20),
+
+              // Other product info fields
               TextFormField(
                 controller: nameEnController,
                 decoration: const InputDecoration(labelText: "Item Name (English)"),
-                validator: (v) => v!.isEmpty ? "Enter item name" : null,
+                validator: (val) => (val==null || val.trim().isEmpty) ? "Required" : null,
               ),
+
               TextFormField(
                 controller: nameTaController,
                 decoration: const InputDecoration(labelText: "Item Name (Tamil)"),
               ),
-              TextFormField(
-                controller: wholesalePriceController,
-                decoration: const InputDecoration(labelText: "Wholesale Price per unit"),
-                keyboardType: TextInputType.number,
-              ),
-              TextFormField(
-                controller: retailPriceController,
-                decoration: const InputDecoration(labelText: "Retail Price per unit"),
-                keyboardType: TextInputType.number,
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: unit,
-                      decoration: const InputDecoration(labelText: "Unit"),
-                      items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                      onChanged: (val) => setState(() => unit = val!),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: minQtyStep,
-                      decoration: const InputDecoration(labelText: "Min Qty Step"),
-                      items: minQtySteps.map((step) => DropdownMenuItem(value: step, child: Text(step))).toList(),
-                      onChanged: (val) => setState(() => minQtyStep = val!),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextFormField(
-                      controller: stockController,
-                      decoration: const InputDecoration(labelText: "Stock"),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                ],
-              ),
-              TextFormField(
-                controller: notifyStockController,
-                decoration: const InputDecoration(labelText: "Notify Admin when stocks ≤"),
-                keyboardType: TextInputType.number,
-              ),
-              TextFormField(
-                controller: offerController,
-                decoration: const InputDecoration(labelText: "Discount Offer (%)"),
-                keyboardType: TextInputType.number,
-              ),
-              TextFormField(
-                controller: otherOfferController,
-                decoration: const InputDecoration(labelText: "Other Offer (Buy 2 Get 1 etc.)"),
-              ),
+
               TextFormField(
                 controller: descriptionController,
                 decoration: const InputDecoration(labelText: "Description"),
                 maxLines: 2,
               ),
+
               TextFormField(
                 controller: otherDescriptionController,
                 decoration: const InputDecoration(labelText: "Other Description"),
                 maxLines: 2,
               ),
+
+              TextFormField(
+                controller: ingredientsController,
+                decoration: const InputDecoration(labelText: "Ingredients"),
+                maxLines: 2,
+              ),
+
               TextFormField(
                 controller: fssaiController,
                 decoration: const InputDecoration(labelText: "FSSAI Number"),
               ),
+
               TextFormField(
                 controller: hsnController,
                 decoration: const InputDecoration(labelText: "Tax/HSN Code"),
               ),
+
               TextFormField(
                 controller: barcodeController,
-                decoration: const InputDecoration(labelText: "Barcode/SKU"),
+                decoration: const InputDecoration(labelText: "Barcode / SKU"),
               ),
+
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text("Expiration Date (optional)"),
-                subtitle: Text(expirationDate != null
-                    ? DateFormat('yyyy-MM-dd').format(expirationDate!)
-                    : "Select date"),
+                subtitle: Text(expirationDate != null ? DateFormat('yyyy-MM-dd').format(expirationDate!) : "Select a date"),
                 trailing: IconButton(
-                  icon: const Icon(Icons.calendar_month),
+                  icon: const Icon(Icons.calendar_today),
                   onPressed: () async {
-                    DateTime? date = await showDatePicker(
+                    DateTime? picked = await showDatePicker(
                       context: context,
                       initialDate: expirationDate ?? DateTime.now(),
                       firstDate: DateTime.now(),
                       lastDate: DateTime(2100),
                     );
-                    if (date != null) setState(() => expirationDate = date);
+                    if(picked != null){
+                      setState(() {
+                        expirationDate = picked;
+                      });
+                    }
                   },
                 ),
               ),
+
               TextFormField(
                 controller: imagesController,
                 decoration: const InputDecoration(
-                  labelText: "Image URLs (comma separated)",
-                  helperText: "Paste 1 or more image links, separated by commas",
+                  labelText: "Image URLs (comma-separated)",
+                  helperText: "Enter one or more image URLs separated by commas",
                 ),
                 maxLines: 2,
-                validator: (s) => s == null || s.trim().isEmpty ? "At least 1 image link required" : null,
+                validator: (val) => (val==null || val.trim().isEmpty) ? "Required" : null,
               ),
+
               SwitchListTile(
+                title: const Text("Is Featured / New"),
                 value: isFeatured,
-                onChanged: (v) => setState(() => isFeatured = v),
-                title: const Text("Is Featured/New"),
+                onChanged: (val) => setState(() => isFeatured = val),
               ),
+
               SwitchListTile(
+                title: const Text("Visible (Active)"),
                 value: isVisible,
-                onChanged: (v) => setState(() => isVisible = v),
-                title: const Text("Visibility (Active)"),
+                onChanged: (val) => setState(() => isVisible = val),
               ),
-              const SizedBox(height: 18),
+
+              const SizedBox(height: 20),
+
               ElevatedButton.icon(
-                icon: const Icon(Icons.check_circle),
+                icon: const Icon(Icons.check_circle_outline),
                 label: const Text("Add Product"),
                 onPressed: addProduct,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  textStyle: const TextStyle(fontSize: 16),
+                ),
               ),
             ],
           ),
@@ -459,3 +617,4 @@ class _AddItemScreenState extends State<AddItemScreen> {
     );
   }
 }
+
