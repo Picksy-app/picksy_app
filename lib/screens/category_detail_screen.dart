@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SubCategory {
@@ -45,54 +44,56 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
   bool isLoadingSubCategories = true;
 
   Future<void> fetchSubCategoryIds() async {
-    QuerySnapshot snapshot;
-    if (widget.categoryId == 'all') {
-      snapshot = await FirebaseFirestore.instance.collection('sub_categories').get();
-    } else {
-      snapshot = await FirebaseFirestore.instance
-          .collection('sub_categories')
-          .where('parent_id', isEqualTo: widget.categoryId)
-          .get();
+    try {
+      final base = FirebaseFirestore.instance.collection('sub_categories');
+      final query = widget.categoryId == 'all'
+          ? base
+          : base.where('parent_id', isEqualTo: widget.categoryId);
+      final snapshot = await query.get();
+      final ids = snapshot.docs.map((d) => d.id).toList();
+      if (!mounted) return;
+      setState(() {
+        categorySubCategoryIds = ids;
+        isLoadingSubCategories = false;
+        if (selectedSubCategoryId == null ||
+            (selectedSubCategoryId != 'all' &&
+                !categorySubCategoryIds.contains(selectedSubCategoryId))) {
+          selectedSubCategoryId = 'all';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => isLoadingSubCategories = false);
     }
-    categorySubCategoryIds = snapshot.docs.map((doc) => doc.id).toList();
-    isLoadingSubCategories = false;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     isLoadingSubCategories = true;
-    fetchSubCategoryIds().then((_) {
-      if (mounted) {
-        setState(() {
-          // Ensure ALL selected initially
-          if (selectedSubCategoryId == null ||
-              (selectedSubCategoryId != 'all' &&
-                  !categorySubCategoryIds.contains(selectedSubCategoryId))) {
-            selectedSubCategoryId = 'all';
-          }
-        });
-      }
-    });
+    fetchSubCategoryIds();
   }
 
-  // Batch Firestore queries for >10 subcategories
+  // Fetch all products under this category (union of all subcategories)
   Future<List<Map<String, dynamic>>> fetchAllProductsForCategory() async {
     if (widget.categoryId == 'all') {
-      // ALL categories: return everything
       final snapshot = await FirebaseFirestore.instance.collection('products').get();
       return snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
     }
-    // Specific category: union of all its subcategories
+
     Set<String> seenProductIds = {};
     List<Map<String, dynamic>> allProducts = [];
+
     for (int i = 0; i < categorySubCategoryIds.length; i += 10) {
       final batchIds = categorySubCategoryIds.skip(i).take(10).toList();
       if (batchIds.isEmpty) continue;
+
+      // IMPORTANT: use arrayContainsAny for arrays
       final snapshot = await FirebaseFirestore.instance
           .collection('products')
-          .where('subCategoryIds', whereIn: batchIds)
+          .where('subCategoryIds', arrayContainsAny: batchIds)
           .get();
+
       for (var doc in snapshot.docs) {
         if (!seenProductIds.contains(doc.id)) {
           seenProductIds.add(doc.id);
@@ -100,12 +101,12 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
         }
       }
     }
+
     return allProducts;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Stream for subcategories: will be displayed with ALL option
     Stream<QuerySnapshot> subCategoryStream = widget.categoryId == 'all'
         ? FirebaseFirestore.instance.collection('sub_categories').snapshots()
         : FirebaseFirestore.instance
@@ -141,7 +142,6 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                     .map((doc) => SubCategory.fromDocument(doc))
                     .toList();
 
-                // Add 'ALL' synthetic option at the top
                 final displaySubcategories = [
                   SubCategory(id: 'all', name: 'ALL', imageUrl: ''),
                   ...subcategories,
@@ -149,6 +149,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
 
                 if (selectedSubCategoryId == null && displaySubcategories.isNotEmpty) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
                     setState(() {
                       selectedSubCategoryId = 'all';
                     });
@@ -170,30 +171,25 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                       },
                       child: Container(
                         decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.grey.shade200
-                              : Colors.white,
+                          color: isSelected ? Colors.grey.shade200 : Colors.white,
                           border: isSelected
                               ? const Border(
                             left: BorderSide(color: Colors.blue, width: 4),
                           )
                               : null,
                         ),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 16, horizontal: 8),
+                        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                         child: Column(
                           children: [
                             if (s.id == 'all')
-                              const Icon(Icons.all_inclusive,
-                                  size: 40, color: Colors.blue)
+                              const Icon(Icons.all_inclusive, size: 40, color: Colors.blue)
                             else if (s.imageUrl.isNotEmpty)
                               Image.network(
                                 s.imageUrl,
                                 width: 40,
                                 height: 40,
                                 fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) =>
-                                const Icon(Icons.broken_image, size: 40),
+                                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 40),
                               )
                             else
                               const SizedBox(height: 40, width: 40),
@@ -204,12 +200,9 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                               overflow: TextOverflow.ellipsis,
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 fontSize: 12,
-                                color:
-                                isSelected ? Colors.blue : Colors.black87,
+                                color: isSelected ? Colors.blue : Colors.black87,
                               ),
                             ),
                           ],
@@ -227,36 +220,10 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
             child: selectedSubCategoryId == null
                 ? const Center(child: Text('Select a sub-category'))
                 : selectedSubCategoryId == 'all'
-                ? StreamBuilder<QuerySnapshot>(
-              stream: widget.categoryId == 'all'
-              // ALL in ALL: fetch all products
-                  ? FirebaseFirestore.instance.collection('products').snapshots()
-              // ALL in category: fetch all products with categoryId matching
-                  : FirebaseFirestore.instance
-                  .collection('products')
-                  .where('categoryId', isEqualTo: widget.categoryId)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(child: Text('Error loading products'));
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('No products found'));
-                }
-                final products = snapshot.data!.docs
-                    .map((doc) => doc.data() as Map<String, dynamic>)
-                    .toList();
-                return ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-                  itemCount: products.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 16),
-                  itemBuilder: (context, index) {
-                    return PrettyProductCard(
-                      data: products[index],
-                    );
-                  },
-                );
-              },
+                ? _AllProductsForCategory(
+              categoryId: widget.categoryId,
+              categorySubCategoryIds: categorySubCategoryIds,
+              fetchAllProductsForCategory: fetchAllProductsForCategory,
             )
                 : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -278,21 +245,114 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                   itemCount: products.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 16),
                   itemBuilder: (context, index) {
-                    return PrettyProductCard(
-                      data: products[index],
-                    );
+                    return PrettyProductCard(data: products[index]);
                   },
                 );
               },
             ),
           ),
-
         ],
       ),
     );
   }
 }
 
+/// Widget that renders ALL products for the current category.
+/// If categoryId == 'all' -> stream all products
+/// Else -> use arrayContainsAny on the subcategory ids (stream if <= 10, otherwise batch fetch once)
+class _AllProductsForCategory extends StatelessWidget {
+  final String categoryId;
+  final List<String> categorySubCategoryIds;
+  final Future<List<Map<String, dynamic>>> Function() fetchAllProductsForCategory;
+
+  const _AllProductsForCategory({
+    required this.categoryId,
+    required this.categorySubCategoryIds,
+    required this.fetchAllProductsForCategory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (categoryId == 'all') {
+      return StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('products').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Error loading products'));
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No products found'));
+          }
+          final products = snapshot.data!.docs
+              .map((doc) => doc.data() as Map<String, dynamic>)
+              .toList();
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            itemCount: products.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            itemBuilder: (context, index) => PrettyProductCard(data: products[index]),
+          );
+        },
+      );
+    }
+
+    if (categorySubCategoryIds.isEmpty) {
+      return const Center(child: Text('No products found'));
+    }
+
+    if (categorySubCategoryIds.length <= 10) {
+      // Stream when it's safe to use a single arrayContainsAny
+      return StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('products')
+            .where('subCategoryIds', arrayContainsAny: categorySubCategoryIds)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('Error loading products'));
+          }
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('No products found'));
+          }
+          final products = snapshot.data!.docs
+              .map((doc) => doc.data() as Map<String, dynamic>)
+              .toList();
+          return ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+            itemCount: products.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            itemBuilder: (context, index) => PrettyProductCard(data: products[index]),
+          );
+        },
+      );
+    }
+
+    // Fallback: batch fetch when subcategory ids > 10
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: fetchAllProductsForCategory(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return const Center(child: Text('Error loading products'));
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('No products found'));
+        }
+        final products = snapshot.data!;
+        return ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+          itemCount: products.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 16),
+          itemBuilder: (context, index) => PrettyProductCard(data: products[index]),
+        );
+      },
+    );
+  }
+}
+
+// ---------------- Product Card ----------------
 class PrettyProductCard extends StatefulWidget {
   final Map<String, dynamic> data;
   const PrettyProductCard({super.key, required this.data});
@@ -317,9 +377,8 @@ class _PrettyProductCardState extends State<PrettyProductCard> {
     final double avgRating = (widget.data['avgRating'] ?? 4.2).toDouble();
     final int ratings = widget.data['ratings'] ?? 1200;
     final List variants = widget.data['variants'] ?? [];
-    final currentVariant = variants.isNotEmpty
-        ? variants[selectedVariantIndex]
-        : {'price': 0, 'qty': '', 'mrp': 0};
+    final currentVariant =
+    variants.isNotEmpty ? variants[selectedVariantIndex] : {'price': 0, 'qty': '', 'mrp': 0};
 
     final num unitPrice = currentVariant['price'] ?? 0;
     final String totalPrice = '\$${(unitPrice * (count == 0 ? 1 : count)).toStringAsFixed(2)}';
@@ -348,6 +407,7 @@ class _PrettyProductCardState extends State<PrettyProductCard> {
                     width: 125,
                     height: 95,
                     fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox(width: 125, height: 95),
                   ),
                 ),
                 if (isBestSeller)
@@ -360,7 +420,8 @@ class _PrettyProductCardState extends State<PrettyProductCard> {
                         color: Colors.orange,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text('Best Seller', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                      child: const Text('Best Seller',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
                   ),
                 if (isOrganic)
@@ -404,7 +465,7 @@ class _PrettyProductCardState extends State<PrettyProductCard> {
                       const Icon(Icons.star, size: 18, color: Colors.grey),
                       const SizedBox(width: 7),
                       Text(
-                        '$avgRating ★  ${ratings > 1000 ? "${(ratings/1000).toStringAsFixed(1)}k" : ratings} ratings',
+                        '$avgRating ★  ${ratings > 1000 ? "${(ratings / 1000).toStringAsFixed(1)}k" : ratings} ratings',
                         style: const TextStyle(fontSize: 13, color: Colors.black54),
                       ),
                     ],
@@ -492,7 +553,8 @@ class _PrettyProductCardState extends State<PrettyProductCard> {
                           icon: const Icon(Icons.shopping_cart_outlined, size: 20),
                           label: const Text("Add", style: TextStyle(fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white, backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.blue,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             textStyle: const TextStyle(fontSize: 16),
                             padding: const EdgeInsets.symmetric(vertical: 13),
