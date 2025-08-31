@@ -41,49 +41,124 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
   String? selectedSubCategoryId;
   int selectedVariantIndex = 0;
   int count = 0;
+  List<String> categorySubCategoryIds = [];
+  bool isLoadingSubCategories = true;
+
+  Future<void> fetchSubCategoryIds() async {
+    QuerySnapshot snapshot;
+    if (widget.categoryId == 'all') {
+      snapshot = await FirebaseFirestore.instance.collection('sub_categories').get();
+    } else {
+      snapshot = await FirebaseFirestore.instance
+          .collection('sub_categories')
+          .where('parent_id', isEqualTo: widget.categoryId)
+          .get();
+    }
+    categorySubCategoryIds = snapshot.docs.map((doc) => doc.id).toList();
+    isLoadingSubCategories = false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    isLoadingSubCategories = true;
+    fetchSubCategoryIds().then((_) {
+      if (mounted) {
+        setState(() {
+          // Ensure ALL selected initially
+          if (selectedSubCategoryId == null ||
+              (selectedSubCategoryId != 'all' &&
+                  !categorySubCategoryIds.contains(selectedSubCategoryId))) {
+            selectedSubCategoryId = 'all';
+          }
+        });
+      }
+    });
+  }
+
+  // Batch Firestore queries for >10 subcategories
+  Future<List<Map<String, dynamic>>> fetchAllProductsForCategory() async {
+    if (widget.categoryId == 'all') {
+      // ALL categories: return everything
+      final snapshot = await FirebaseFirestore.instance.collection('products').get();
+      return snapshot.docs.map((doc) => doc.data() as Map<String, dynamic>).toList();
+    }
+    // Specific category: union of all its subcategories
+    Set<String> seenProductIds = {};
+    List<Map<String, dynamic>> allProducts = [];
+    for (int i = 0; i < categorySubCategoryIds.length; i += 10) {
+      final batchIds = categorySubCategoryIds.skip(i).take(10).toList();
+      if (batchIds.isEmpty) continue;
+      final snapshot = await FirebaseFirestore.instance
+          .collection('products')
+          .where('subCategoryIds', whereIn: batchIds)
+          .get();
+      for (var doc in snapshot.docs) {
+        if (!seenProductIds.contains(doc.id)) {
+          seenProductIds.add(doc.id);
+          allProducts.add(doc.data() as Map<String, dynamic>);
+        }
+      }
+    }
+    return allProducts;
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Stream for subcategories: will be displayed with ALL option
+    Stream<QuerySnapshot> subCategoryStream = widget.categoryId == 'all'
+        ? FirebaseFirestore.instance.collection('sub_categories').snapshots()
+        : FirebaseFirestore.instance
+        .collection('sub_categories')
+        .where('parent_id', isEqualTo: widget.categoryId)
+        .snapshots();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.categoryName),
         foregroundColor: Colors.black,
         backgroundColor: Colors.white,
       ),
-      body: Row(
+      body: isLoadingSubCategories
+          ? const Center(child: CircularProgressIndicator())
+          : Row(
         children: [
-          // Sidebar: Subcategories
+          // Sidebar: Subcategories + ALL option
           Container(
             width: 100,
             color: Colors.white,
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('sub_categories')
-                  .where('parent_id', isEqualTo: widget.categoryId)
-                  .snapshots(),
+              stream: subCategoryStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return const Center(child: Text('Error loading subcategories'));
                 }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('No sub-categories'));
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
                 }
+
                 final subcategories = snapshot.data!.docs
                     .map((doc) => SubCategory.fromDocument(doc))
                     .toList();
-                if (selectedSubCategoryId == null) {
+
+                // Add 'ALL' synthetic option at the top
+                final displaySubcategories = [
+                  SubCategory(id: 'all', name: 'ALL', imageUrl: ''),
+                  ...subcategories,
+                ];
+
+                if (selectedSubCategoryId == null && displaySubcategories.isNotEmpty) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (subcategories.isNotEmpty) {
-                      setState(() {
-                        selectedSubCategoryId = subcategories.first.id;
-                      });
-                    }
+                    setState(() {
+                      selectedSubCategoryId = 'all';
+                    });
                   });
                 }
+
                 return ListView.builder(
-                  itemCount: subcategories.length,
+                  itemCount: displaySubcategories.length,
                   itemBuilder: (context, index) {
-                    final s = subcategories[index];
+                    final s = displaySubcategories[index];
                     final isSelected = s.id == selectedSubCategoryId;
                     return InkWell(
                       onTap: () {
@@ -95,24 +170,30 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                       },
                       child: Container(
                         decoration: BoxDecoration(
-                          color: isSelected ? Colors.grey.shade200 : Colors.white,
+                          color: isSelected
+                              ? Colors.grey.shade200
+                              : Colors.white,
                           border: isSelected
                               ? const Border(
-                              left: BorderSide(color: Colors.blue, width: 4))
+                            left: BorderSide(color: Colors.blue, width: 4),
+                          )
                               : null,
                         ),
                         padding: const EdgeInsets.symmetric(
                             vertical: 16, horizontal: 8),
                         child: Column(
                           children: [
-                            if (s.imageUrl.isNotEmpty)
+                            if (s.id == 'all')
+                              const Icon(Icons.all_inclusive,
+                                  size: 40, color: Colors.blue)
+                            else if (s.imageUrl.isNotEmpty)
                               Image.network(
                                 s.imageUrl,
                                 width: 40,
                                 height: 40,
                                 fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) => const Icon(
-                                    Icons.broken_image, size: 40),
+                                errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.broken_image, size: 40),
                               )
                             else
                               const SizedBox(height: 40, width: 40),
@@ -127,7 +208,8 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                                     ? FontWeight.bold
                                     : FontWeight.normal,
                                 fontSize: 12,
-                                color: isSelected ? Colors.blue : Colors.black87,
+                                color:
+                                isSelected ? Colors.blue : Colors.black87,
                               ),
                             ),
                           ],
@@ -138,11 +220,44 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                 );
               },
             ),
-          ), // End of sidebar
+          ),
+
           // Main content: product list
           Expanded(
             child: selectedSubCategoryId == null
                 ? const Center(child: Text('Select a sub-category'))
+                : selectedSubCategoryId == 'all'
+                ? StreamBuilder<QuerySnapshot>(
+              stream: widget.categoryId == 'all'
+              // ALL in ALL: fetch all products
+                  ? FirebaseFirestore.instance.collection('products').snapshots()
+              // ALL in category: fetch all products with categoryId matching
+                  : FirebaseFirestore.instance
+                  .collection('products')
+                  .where('categoryId', isEqualTo: widget.categoryId)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(child: Text('Error loading products'));
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(child: Text('No products found'));
+                }
+                final products = snapshot.data!.docs
+                    .map((doc) => doc.data() as Map<String, dynamic>)
+                    .toList();
+                return ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+                  itemCount: products.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 16),
+                  itemBuilder: (context, index) {
+                    return PrettyProductCard(
+                      data: products[index],
+                    );
+                  },
+                );
+              },
+            )
                 : StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('products')
@@ -159,8 +274,7 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                     .map((doc) => doc.data() as Map<String, dynamic>)
                     .toList();
                 return ListView.separated(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 18),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
                   itemCount: products.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 16),
                   itemBuilder: (context, index) {
@@ -171,12 +285,14 @@ class _CategoryDetailScreenState extends State<CategoryDetailScreen> {
                 );
               },
             ),
-          )
+          ),
+
         ],
       ),
     );
   }
 }
+
 class PrettyProductCard extends StatefulWidget {
   final Map<String, dynamic> data;
   const PrettyProductCard({super.key, required this.data});

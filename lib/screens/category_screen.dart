@@ -66,9 +66,20 @@ class CategoryScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final categories = snapshot.data!.docs
+          var categories = snapshot.data!.docs
               .map((doc) => Category.fromDocument(doc))
               .toList();
+
+          // Add the "ALL" option as a virtual first category
+          categories.insert(
+            0,
+            Category(
+              id: 'all',
+              name: 'ALL',
+              nameTa: 'அனைத்து', // Change as suits
+              imageUrl: '', // Or an asset url for "ALL"
+            ),
+          );
 
           if (categories.isEmpty) {
             return const Center(child: Text('No categories found.'));
@@ -86,13 +97,75 @@ class CategoryScreen extends StatelessWidget {
               ),
               itemBuilder: (context, index) {
                 final category = categories[index];
+                // Special logic for ALL
+                if (category.id == 'all') {
+                  return _AllTile(onTap: () {
+                    // TODO: Navigate or update UI to show all subcategories.
+                    // Example: Navigator.push to a screen listing all subcategories.
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CategoryDetailScreen(
+                          categoryId: 'all',
+                          categoryName: 'ALL',
+                        ),
+                      ),
+                    );
+                  });
+                }
                 return CategoryTile(category: category);
               },
             ),
           );
         },
       ),
-      // Removed other section headers and snack sections for simplicity
+    );
+  }
+}
+
+class _AllTile extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AllTile({required this.onTap, Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(color: Colors.blue.shade100, blurRadius: 1)
+              ],
+            ),
+            padding: const EdgeInsets.all(8),
+            child: Icon(Icons.apps, color: Colors.blue, size: 40),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'ALL',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.blue,
+            ),
+          ),
+          Text(
+            'அனைத்து',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.blue.shade400,
+            ),
+          )
+        ],
+      ),
     );
   }
 }
@@ -105,7 +178,6 @@ class CategoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: () {
-        // Pass category id and name to detail screen
         Navigator.push(
           context,
           MaterialPageRoute(
